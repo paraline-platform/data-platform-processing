@@ -38,7 +38,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
 
       - name: Install dbt
         run: |
@@ -67,30 +66,25 @@ jobs:
           echo "dbt parse passed ✓"
 
   # ----------------------------------------------------------
-  # JOB 2: Validate SparkApplication YAMLs
-  # kubeconform với schema CRD của Spark Operator
+  # JOB 2: Validate spark-jobs/ YAML syntax
+  # spark-jobs/*.yaml là VALUES files cho Helm chart spark-job,
+  # không phải K8s manifests — chỉ cần check YAML hợp lệ.
   # ----------------------------------------------------------
   validate-spark:
-    name: Validate SparkApplication YAMLs
+    name: Validate SparkJob YAML Syntax
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install kubeconform
-        run: |
-          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
-            | tar xz -C /usr/local/bin
+      - name: Install yamllint
+        run: pip install yamllint
 
-      - name: Validate spark-jobs/
+      - name: Validate spark-jobs/ YAML syntax
         run: |
-          echo "==> Validating SparkApplication YAMLs..."
-          kubeconform \
-            -ignore-missing-schemas \
-            -kubernetes-version 1.31.0 \
-            -summary \
-            spark-jobs/*.yaml
-          echo "Spark job validation passed ✓"
+          echo "==> Checking YAML syntax in spark-jobs/..."
+          yamllint -d "{extends: relaxed, rules: {line-length: {max: 200}}}" spark-jobs/
+          echo "Spark job YAML syntax passed ✓"
 
   # ----------------------------------------------------------
   # JOB 3: Build & Push dbt Docker image
