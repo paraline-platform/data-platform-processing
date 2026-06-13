@@ -1,0 +1,137 @@
+# ============================================================
+# CI — data-platform-processing
+#
+# Jobs:
+#   1. dbt-parse       : Validate dbt project syntax (dbt parse)
+#   2. validate-spark  : kubeconform check SparkApplication YAMLs
+#   3. build-dbt-image : Build + push ghcr.io/tungnt763/dbt:<sha>
+#
+# Submodule note: platform/ submodule KHÔNG cần checkout ở đây
+# vì dbt parse và build image không đọc platform/ (chỉ scripts local cần)
+# ============================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/tungnt763/dbt
+
+jobs:
+  # ----------------------------------------------------------
+  # JOB 1: Parse & validate dbt project
+  # dbt parse = compile toàn bộ models, detect lỗi Jinja/YAML/ref()
+  # Không cần database — chỉ kiểm tra cú pháp
+  # ----------------------------------------------------------
+  dbt-parse:
+    name: dbt Parse (syntax validation)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dbt
+        run: |
+          pip install "dbt-core>=1.8.0,<2.0.0" "dbt-spark[PyHive]>=1.8.0,<2.0.0"
+
+      - name: Create dummy profiles.yml for parse
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << 'EOF'
+          data_platform:
+            target: dev
+            outputs:
+              dev:
+                type: spark
+                method: thrift
+                host: localhost
+                port: 10000
+                schema: dbt_dev
+                threads: 1
+          EOF
+
+      - name: dbt parse
+        run: |
+          echo "==> Running dbt parse (syntax + ref() validation)..."
+          cd dbt && dbt parse --profiles-dir ~/.dbt --project-dir .
+          echo "dbt parse passed ✓"
+
+  # ----------------------------------------------------------
+  # JOB 2: Validate SparkApplication YAMLs
+  # kubeconform với schema CRD của Spark Operator
+  # ----------------------------------------------------------
+  validate-spark:
+    name: Validate SparkApplication YAMLs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin
+
+      - name: Validate spark-jobs/
+        run: |
+          echo "==> Validating SparkApplication YAMLs..."
+          kubeconform \
+            -ignore-missing-schemas \
+            -kubernetes-version 1.31.0 \
+            -summary \
+            spark-jobs/*.yaml
+          echo "Spark job validation passed ✓"
+
+  # ----------------------------------------------------------
+  # JOB 3: Build & Push dbt Docker image
+  # Image chứa dbt + toàn bộ project files → chạy như K8s Job
+  # ----------------------------------------------------------
+  build-dbt-image:
+    name: Build & Push dbt Image
+    runs-on: ubuntu-latest
+    needs: [dbt-parse, validate-spark]   # Build chỉ khi cả 2 job trên pass
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push dbt image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/dbt/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
