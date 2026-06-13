@@ -30,14 +30,16 @@ ACTION=${4:-apply}
 # --- Paths ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-CHART_DIR="$ROOT_DIR/platform/charts/spark-job"
-PROFILES_FILE="$ROOT_DIR/platform/spark-profiles/${ENV}.yaml"
+# INFRA_DIR: platform/ = submodule root (data-platform-infra), platform config lives inside platform/
+INFRA_DIR="$ROOT_DIR/platform/platform"
+CHART_DIR="$INFRA_DIR/charts/spark-job"
+PROFILES_FILE="$INFRA_DIR/spark-profiles/${ENV}.yaml"
 JOB_FILE="$ROOT_DIR/spark-jobs/${JOB_NAME}.yaml"
 
 # --- Validate ---
 if [[ ! -f "$PROFILES_FILE" ]]; then
   echo "ERROR: Profiles file not found: $PROFILES_FILE"
-  echo "       Available envs: $(ls "$ROOT_DIR/platform/spark-profiles/" | sed 's/.yaml//' | tr '\n' ', ')"
+  echo "       Available envs: $(ls "$INFRA_DIR/spark-profiles/" | sed 's/.yaml//' | tr '\n' ', ')"
   exit 1
 fi
 if [[ ! -f "$JOB_FILE" ]]; then

@@ -38,12 +38,14 @@ DBT_OPTS="${*:-}"        # Ví dụ: "--select staging --full-refresh"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 DBT_DIR="$ROOT_DIR/dbt"
-ENV_FILE="$ROOT_DIR/platform/environments/${ENV}.yaml"
+# INFRA_DIR: platform/ = submodule root (data-platform-infra), platform config lives inside platform/
+INFRA_DIR="$ROOT_DIR/platform/platform"
+ENV_FILE="$INFRA_DIR/environments/${ENV}.yaml"
 
 # --- Validate ---
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "ERROR: Environment file not found: $ENV_FILE"
-  echo "       Available envs: $(ls "$ROOT_DIR/platform/environments/" | sed 's/.yaml//' | tr '\n' ', ')"
+  echo "       Available envs: $(ls "$INFRA_DIR/environments/" | sed 's/.yaml//' | tr '\n' ', ')"
   exit 1
 fi
 if [[ ! -f "$DBT_DIR/dbt_project.yml" ]]; then
