@@ -1,0 +1,31 @@
+name: data_platform
+version: '1.0.0'
+config-version: 2
+
+profile: data_platform
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  data_platform:
+    # Tất cả models dùng Iceberg format, lưu vào s3a://warehouse/dbt/
+    # Nessie là default catalog → nessie.<schema>.<model>
+    +file_format: iceberg
+    +location_root: "s3a://warehouse/dbt"
+
+    staging:
+      # View: không tạo file trong MinIO, chỉ là SQL reference
+      # Nhanh hơn table, không tốn storage
+      +materialized: view
+
+    marts:
+      # Table: materialized Iceberg table trong MinIO
+      # Fast reads, có partition pruning, hỗ trợ time-travel
+      +materialized: table

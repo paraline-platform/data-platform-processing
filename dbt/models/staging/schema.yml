@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: stg_products
+    description: "Cleaned products với price_tier classification"
+    columns:
+      - name: id
+        tests: [not_null, unique]
+      - name: category
+        tests: [not_null]
+      - name: price
+        tests: [not_null]
+      - name: price_tier
+        tests:
+          - accepted_values:
+              values: ['budget', 'mid-range', 'premium']

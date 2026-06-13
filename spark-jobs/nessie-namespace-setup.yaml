@@ -1,0 +1,150 @@
+# ============================================================
+# SPARK-JOBS/NESSIE-NAMESPACE-SETUP.YAML — Tạo Nessie namespaces
+# ============================================================
+# Tạo các namespaces cần thiết trong Nessie trước khi chạy dbt:
+#   nessie.default  — required bởi Spark ThriftServer (default schema)
+#   nessie.dbt_dev  — required bởi dbt-spark khi schema=dbt_dev
+#
+# Cách chạy:
+#   ./scripts/run-spark-job.sh dev small nessie-namespace-setup
+#   ./scripts/run-spark-job.sh dev small nessie-namespace-setup logs
+#   ./scripts/run-spark-job.sh dev small nessie-namespace-setup delete
+#
+# Chạy 1 lần duy nhất (idempotent — dùng IF NOT EXISTS)
+# ============================================================
+
+name: nessie-namespace-setup
+namespace: data-processing
+image: "apache/spark:3.5.3"
+imagePullPolicy: IfNotPresent
+type: Python
+mode: cluster
+mainApplicationFile: "local:///tmp/setup.py"
+sparkVersion: "3.5.3"
+restartPolicy:
+  type: Never
+
+sparkConf:
+  "spark.sql.extensions": "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
+  "spark.sql.catalog.nessie":               "org.apache.iceberg.spark.SparkCatalog"
+  "spark.sql.catalog.nessie.catalog-impl":  "org.apache.iceberg.nessie.NessieCatalog"
+  "spark.sql.catalog.nessie.uri":           "http://nessie.data-modeling.svc.cluster.local:19120/api/v2"
+  "spark.sql.catalog.nessie.ref":           "main"
+  "spark.sql.catalog.nessie.warehouse":     "s3a://warehouse/"
+  "spark.hadoop.fs.s3a.endpoint":               "http://minio.data-storage.svc.cluster.local:9000"
+  "spark.hadoop.fs.s3a.access.key":             "admin"
+  "spark.hadoop.fs.s3a.secret.key":             "minio-dev-password"
+  "spark.hadoop.fs.s3a.path.style.access":      "true"
+  "spark.hadoop.fs.s3a.impl":                   "org.apache.hadoop.fs.s3a.S3AFileSystem"
+  "spark.hadoop.fs.s3a.connection.ssl.enabled": "false"
+  "spark.jars": "local:///tmp/jars/iceberg-spark-runtime-3.5_2.12-1.6.1.jar,local:///tmp/jars/hadoop-aws-3.3.4.jar,local:///tmp/jars/aws-java-sdk-s3-1.12.587.jar,local:///tmp/jars/aws-java-sdk-core-1.12.587.jar,local:///tmp/jars/aws-java-sdk-sts-1.12.587.jar,local:///tmp/jars/aws-java-sdk-dynamodb-1.12.587.jar"
+  "spark.driver.extraClassPath": "/tmp/jars/iceberg-spark-runtime-3.5_2.12-1.6.1.jar:/tmp/jars/hadoop-aws-3.3.4.jar:/tmp/jars/aws-java-sdk-s3-1.12.587.jar:/tmp/jars/aws-java-sdk-core-1.12.587.jar:/tmp/jars/aws-java-sdk-sts-1.12.587.jar:/tmp/jars/aws-java-sdk-dynamodb-1.12.587.jar"
+  "spark.kubernetes.driver.deleteOnTermination": "false"
+
+volumes:
+  - name: workdir
+    emptyDir: {}
+
+driverExtras:
+  initContainers:
+    - name: setup
+      image: busybox
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          mkdir -p /tmp/jars
+          MAVEN="https://repo1.maven.org/maven2"
+
+          echo "[1/6] iceberg-spark-runtime-3.5_2.12-1.6.1.jar"
+          wget -q -O /tmp/jars/iceberg-spark-runtime-3.5_2.12-1.6.1.jar \
+            "${MAVEN}/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar"
+
+          echo "[2/6] hadoop-aws-3.3.4.jar"
+          wget -q -O /tmp/jars/hadoop-aws-3.3.4.jar \
+            "${MAVEN}/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar"
+
+          echo "[3/6] aws-java-sdk-s3-1.12.587.jar"
+          wget -q -O /tmp/jars/aws-java-sdk-s3-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-s3/1.12.587/aws-java-sdk-s3-1.12.587.jar"
+
+          echo "[4/6] aws-java-sdk-core-1.12.587.jar"
+          wget -q -O /tmp/jars/aws-java-sdk-core-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-core/1.12.587/aws-java-sdk-core-1.12.587.jar"
+
+          echo "[5/6] aws-java-sdk-sts-1.12.587.jar"
+          wget -q -O /tmp/jars/aws-java-sdk-sts-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-sts/1.12.587/aws-java-sdk-sts-1.12.587.jar"
+
+          echo "[6/6] aws-java-sdk-dynamodb-1.12.587.jar"
+          wget -q -O /tmp/jars/aws-java-sdk-dynamodb-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-dynamodb/1.12.587/aws-java-sdk-dynamodb-1.12.587.jar"
+
+          echo "Writing setup script..."
+          cat > /tmp/setup.py << 'PYEOF'
+          from pyspark.sql import SparkSession
+
+          spark = SparkSession.builder.appName("nessie-namespace-setup").getOrCreate()
+          spark.sparkContext.setLogLevel("WARN")
+
+          SEP = "=" * 60
+          print("\n" + SEP)
+          print("NESSIE NAMESPACE SETUP")
+          print(SEP)
+
+          # Tạo 'default' namespace — required bởi Spark ThriftServer default session
+          spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.default")
+          print("[1] Namespace 'nessie.default' created (ThriftServer default session)")
+
+          # Tạo 'dbt_dev' namespace — required bởi dbt-spark khi schema=dbt_dev
+          spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.dbt_dev")
+          print("[2] Namespace 'nessie.dbt_dev' created (dbt dev target)")
+
+          # List all namespaces để verify
+          print("\n[3] All namespaces in Nessie:")
+          spark.sql("SHOW NAMESPACES IN nessie").show(truncate=False)
+
+          print(SEP)
+          print("SETUP COMPLETE")
+          print(SEP + "\n")
+          spark.stop()
+          PYEOF
+          echo "Setup complete."
+      volumeMounts:
+        - name: workdir
+          mountPath: /tmp
+  volumeMounts:
+    - name: workdir
+      mountPath: /tmp
+
+executorExtras:
+  initContainers:
+    - name: download-jars
+      image: busybox
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          mkdir -p /tmp/jars
+          MAVEN="https://repo1.maven.org/maven2"
+          wget -q -O /tmp/jars/iceberg-spark-runtime-3.5_2.12-1.6.1.jar \
+            "${MAVEN}/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar"
+          wget -q -O /tmp/jars/hadoop-aws-3.3.4.jar \
+            "${MAVEN}/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar"
+          wget -q -O /tmp/jars/aws-java-sdk-s3-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-s3/1.12.587/aws-java-sdk-s3-1.12.587.jar"
+          wget -q -O /tmp/jars/aws-java-sdk-core-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-core/1.12.587/aws-java-sdk-core-1.12.587.jar"
+          wget -q -O /tmp/jars/aws-java-sdk-sts-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-sts/1.12.587/aws-java-sdk-sts-1.12.587.jar"
+          wget -q -O /tmp/jars/aws-java-sdk-dynamodb-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-dynamodb/1.12.587/aws-java-sdk-dynamodb-1.12.587.jar"
+          echo "Executor JARs ready."
+      volumeMounts:
+        - name: workdir
+          mountPath: /tmp
+  volumeMounts:
+    - name: workdir
+      mountPath: /tmp

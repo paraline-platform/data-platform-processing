@@ -1,0 +1,206 @@
+# ============================================================
+# SPARK-JOBS/ICEBERG-TEST.YAML — Test: Iceberg + Nessie + MinIO
+# ============================================================
+# Verify:
+#   1. Spark kết nối được Nessie catalog (data-modeling namespace)
+#   2. Tạo Iceberg table, ghi dữ liệu vào MinIO (S3A)
+#   3. Query lại dữ liệu từ Iceberg table
+#
+# Cách chạy:
+#   ./scripts/run-spark-job.sh dev small iceberg-test
+#   ./scripts/run-spark-job.sh dev small iceberg-test logs
+#   ./scripts/run-spark-job.sh dev small iceberg-test delete
+#
+# JARs cần thiết (download bởi initContainer):
+#   iceberg-spark-runtime-3.5_2.12-1.6.1.jar  — Iceberg + NessieCatalog (~35MB)
+#   aws-java-sdk-s3-1.12.587.jar              — S3 operations
+#   aws-java-sdk-core-1.12.587.jar            — AWS SDK core
+#   aws-java-sdk-sts-1.12.587.jar             — STS auth
+#   aws-java-sdk-dynamodb-1.12.587.jar        — S3AFileSystem loads DynamoDB credential provider
+#   hadoop-aws-3.3.4.jar                      — S3AFileSystem implementation
+#
+# Lý do dùng initContainer thay vì --packages:
+#   --packages → Ivy resolver chạy trong Spark Operator pod
+#   Operator pod không có home directory → /nonexistent/.ivy2.5.2/cache fail
+#   initContainer chạy trước driver → download JARs trước, không cần Ivy
+# ============================================================
+
+name: iceberg-nessie-test
+namespace: data-processing
+image: "apache/spark:3.5.3"
+imagePullPolicy: IfNotPresent
+type: Python
+mode: cluster
+mainApplicationFile: "local:///tmp/test.py"
+sparkVersion: "3.5.3"
+restartPolicy:
+  type: Never
+
+sparkConf:
+  # Iceberg SQL extensions — bật CREATE TABLE ... USING iceberg, table.history, v$snapshots...
+  "spark.sql.extensions": "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
+
+  # Nessie catalog config
+  # Truy cập bằng: spark.sql("SELECT * FROM nessie.demo.products")
+  "spark.sql.catalog.nessie":               "org.apache.iceberg.spark.SparkCatalog"
+  "spark.sql.catalog.nessie.catalog-impl":  "org.apache.iceberg.nessie.NessieCatalog"
+  "spark.sql.catalog.nessie.uri":           "http://nessie.data-modeling.svc.cluster.local:19120/api/v2"
+  "spark.sql.catalog.nessie.ref":           "main"
+  "spark.sql.catalog.nessie.warehouse":     "s3a://warehouse/"
+
+  # MinIO S3A config
+  "spark.hadoop.fs.s3a.endpoint":               "http://minio.data-storage.svc.cluster.local:9000"
+  "spark.hadoop.fs.s3a.access.key":             "admin"
+  "spark.hadoop.fs.s3a.secret.key":             "minio-dev-password"
+  "spark.hadoop.fs.s3a.path.style.access":      "true"
+  "spark.hadoop.fs.s3a.impl":                   "org.apache.hadoop.fs.s3a.S3AFileSystem"
+  "spark.hadoop.fs.s3a.connection.ssl.enabled": "false"
+
+  # JARs được download bởi initContainer vào /tmp/jars/
+  # local:// = đọc từ filesystem của driver/executor pod (không qua Ivy)
+  "spark.jars": "local:///tmp/jars/iceberg-spark-runtime-3.5_2.12-1.6.1.jar,local:///tmp/jars/hadoop-aws-3.3.4.jar,local:///tmp/jars/aws-java-sdk-s3-1.12.587.jar,local:///tmp/jars/aws-java-sdk-core-1.12.587.jar,local:///tmp/jars/aws-java-sdk-sts-1.12.587.jar,local:///tmp/jars/aws-java-sdk-dynamodb-1.12.587.jar"
+
+  # Giữ driver pod sau khi fail để đọc logs (debug mode)
+  "spark.kubernetes.driver.deleteOnTermination": "false"
+
+# emptyDir volume: chia sẻ giữa initContainer và main container trong cùng pod
+volumes:
+  - name: workdir
+    emptyDir: {}
+
+# ============================================================
+# DRIVER: download JARs + write test script
+# ============================================================
+driverExtras:
+  initContainers:
+    - name: setup
+      image: busybox
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          mkdir -p /tmp/jars
+          MAVEN="https://repo1.maven.org/maven2"
+
+          echo "[1/6] Downloading iceberg-spark-runtime (~35MB)..."
+          wget -q -O /tmp/jars/iceberg-spark-runtime-3.5_2.12-1.6.1.jar \
+            "${MAVEN}/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar"
+
+          echo "[2/6] Downloading hadoop-aws..."
+          wget -q -O /tmp/jars/hadoop-aws-3.3.4.jar \
+            "${MAVEN}/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar"
+
+          echo "[3/6] Downloading aws-java-sdk-s3..."
+          wget -q -O /tmp/jars/aws-java-sdk-s3-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-s3/1.12.587/aws-java-sdk-s3-1.12.587.jar"
+
+          echo "[4/6] Downloading aws-java-sdk-core..."
+          wget -q -O /tmp/jars/aws-java-sdk-core-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-core/1.12.587/aws-java-sdk-core-1.12.587.jar"
+
+          echo "[5/6] Downloading aws-java-sdk-sts..."
+          wget -q -O /tmp/jars/aws-java-sdk-sts-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-sts/1.12.587/aws-java-sdk-sts-1.12.587.jar"
+
+          echo "[6/6] Downloading aws-java-sdk-dynamodb (needed by S3AFileSystem credential provider)..."
+          wget -q -O /tmp/jars/aws-java-sdk-dynamodb-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-dynamodb/1.12.587/aws-java-sdk-dynamodb-1.12.587.jar"
+
+          echo "JARs ready:"
+          ls -lh /tmp/jars/
+
+          echo "Writing test script..."
+          cat > /tmp/test.py << 'PYEOF'
+          from pyspark.sql import SparkSession
+
+          spark = SparkSession.builder.appName("iceberg-nessie-test").getOrCreate()
+          spark.sparkContext.setLogLevel("WARN")
+
+          SEP = "=" * 60
+          print("\n" + SEP)
+          print("ICEBERG + NESSIE + MINIO INTEGRATION TEST")
+          print(SEP)
+
+          # 1. Tạo namespace trong Nessie catalog
+          spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.demo")
+          print("\n[1] Namespace 'nessie.demo' created in Nessie")
+
+          # 2. Tạo Iceberg table (data lưu trên MinIO qua S3A)
+          spark.sql("""
+              CREATE TABLE IF NOT EXISTS nessie.demo.products (
+                id       INT,
+                name     STRING,
+                category STRING,
+                price    DOUBLE
+              ) USING iceberg
+          """)
+          print("[2] Iceberg table 'nessie.demo.products' created")
+          print("    Data files will be stored in: s3a://warehouse/demo/products/")
+
+          # 3. Insert dữ liệu
+          spark.sql("""
+              INSERT INTO nessie.demo.products VALUES
+                (1, 'Laptop Pro 16',   'electronics', 1299.99),
+                (2, 'Wireless Mouse',  'electronics',   29.99),
+                (3, 'Standing Desk',   'furniture',    599.99)
+          """)
+          print("[3] Inserted 3 rows into Iceberg table")
+
+          # 4. Query lại
+          df = spark.sql("SELECT * FROM nessie.demo.products ORDER BY id")
+          count = df.count()
+          print(f"\n[4] Query result: {count} rows")
+          df.show()
+
+          # 5. Xem snapshot history
+          history = spark.sql("SELECT * FROM nessie.demo.products.history")
+          print("[5] Table snapshot history (Iceberg time-travel):")
+          history.select("made_current_at", "snapshot_id", "parent_id").show()
+
+          print(SEP)
+          print("TEST PASSED: Iceberg + Nessie + MinIO integration OK!")
+          print(SEP + "\n")
+          spark.stop()
+          PYEOF
+          echo "Setup complete."
+      volumeMounts:
+        - name: workdir
+          mountPath: /tmp
+  volumeMounts:
+    - name: workdir
+      mountPath: /tmp
+
+# ============================================================
+# EXECUTOR: chỉ cần JARs (không cần test script)
+# ============================================================
+executorExtras:
+  initContainers:
+    - name: download-jars
+      image: busybox
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          mkdir -p /tmp/jars
+          MAVEN="https://repo1.maven.org/maven2"
+          wget -q -O /tmp/jars/iceberg-spark-runtime-3.5_2.12-1.6.1.jar \
+            "${MAVEN}/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar"
+          wget -q -O /tmp/jars/hadoop-aws-3.3.4.jar \
+            "${MAVEN}/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar"
+          wget -q -O /tmp/jars/aws-java-sdk-s3-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-s3/1.12.587/aws-java-sdk-s3-1.12.587.jar"
+          wget -q -O /tmp/jars/aws-java-sdk-core-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-core/1.12.587/aws-java-sdk-core-1.12.587.jar"
+          wget -q -O /tmp/jars/aws-java-sdk-sts-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-sts/1.12.587/aws-java-sdk-sts-1.12.587.jar"
+          wget -q -O /tmp/jars/aws-java-sdk-dynamodb-1.12.587.jar \
+            "${MAVEN}/com/amazonaws/aws-java-sdk-dynamodb/1.12.587/aws-java-sdk-dynamodb-1.12.587.jar"
+          echo "Executor JARs ready."
+      volumeMounts:
+        - name: workdir
+          mountPath: /tmp
+  volumeMounts:
+    - name: workdir
+      mountPath: /tmp

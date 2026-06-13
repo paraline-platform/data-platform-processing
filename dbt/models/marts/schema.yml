@@ -1,0 +1,12 @@
+version: 2
+
+models:
+  - name: products_by_category
+    description: "Aggregated products by category và price tier — Iceberg table"
+    columns:
+      - name: category
+        tests: [not_null]
+      - name: price_tier
+        tests: [not_null]
+      - name: product_count
+        tests: [not_null]

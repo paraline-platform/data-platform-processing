@@ -1,0 +1,35 @@
+# ============================================================
+# SPARK-JOBS/SPARK-PI.YAML — Test job: tính Pi (Monte Carlo)
+# ============================================================
+# Mục đích: verify Spark Operator + resource profiles hoạt động
+#
+# Cách chạy:
+#   ./scripts/run-spark-job.sh dev small spark-pi
+#   ./scripts/run-spark-job.sh dev medium spark-pi
+#
+# Check kết quả:
+#   kubectl logs -n data-processing spark-pi-driver -f
+#   # Kết quả xuất hiện dòng: "Pi is roughly 3.14..."
+#
+# Xóa sau khi test:
+#   ./scripts/run-spark-job.sh dev small spark-pi delete
+# ============================================================
+
+name: spark-pi
+namespace: data-processing
+
+image: "apache/spark:3.5.3"
+imagePullPolicy: IfNotPresent
+type: Scala
+mode: cluster
+
+mainClass: org.apache.spark.examples.SparkPi
+mainApplicationFile: "local:///opt/spark/examples/jars/spark-examples_2.12-3.5.3.jar"
+
+# Số iterations Monte Carlo — nhiều hơn = chính xác hơn nhưng chậm hơn
+arguments:
+  - "100"
+
+sparkVersion: "3.5.3"
+restartPolicy:
+  type: Never

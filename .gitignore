@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Secrets
+.env
+*.env.local
+
+# dbt build artifacts
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Temp
+tmp/
+*.log
