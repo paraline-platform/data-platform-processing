@@ -1,8 +1,8 @@
 {{ config(materialized='view') }}
 
 -- Staging layer: clean + enrich source data
--- Source: nessie.demo.products (Iceberg table, tạo bởi iceberg-test Spark job)
--- Output: view trong nessie.<schema>.stg_products
+-- Source: lakehouse.demo.products (Iceberg table, tạo bởi iceberg-test Spark job)
+-- Output: view trong lakehouse.<schema>.stg_products
 
 SELECT
     id,

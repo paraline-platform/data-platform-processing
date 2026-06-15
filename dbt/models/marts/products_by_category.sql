@@ -5,7 +5,7 @@
 ) }}
 
 -- Mart layer: business aggregation
--- Output: Iceberg table nessie.<schema>.products_by_category
+-- Output: Iceberg table lakehouse.<schema>.products_by_category
 -- Lưu trong MinIO: s3a://warehouse/dbt/<schema>/products_by_category/
 
 SELECT
