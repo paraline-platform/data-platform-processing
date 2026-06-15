@@ -2,9 +2,9 @@ version: 2
 
 sources:
   - name: demo
-    # spark.sql.defaultCatalog=nessie → schema "demo" = nessie.demo
+    # spark.sql.defaultCatalog=lakehouse → schema "demo" = lakehouse.demo
     schema: demo
-    description: "Iceberg tables trong nessie.demo (tạo bởi iceberg-test Spark job)"
+    description: "Iceberg tables trong lakehouse.demo (tạo bởi iceberg-test Spark job)"
     tables:
       - name: products
         description: "Demo products table — id, name, category, price"

@@ -1,19 +1,21 @@
 # ============================================================
-# SPARK-JOBS/NESSIE-NAMESPACE-SETUP.YAML — Tạo Nessie namespaces
+# SPARK-JOBS/LAKEHOUSE-NAMESPACE-SETUP.YAML — Tạo Iceberg namespaces
 # ============================================================
-# Tạo các namespaces cần thiết trong Nessie trước khi chạy dbt:
-#   nessie.default  — required bởi Spark ThriftServer (default schema)
-#   nessie.dbt_dev  — required bởi dbt-spark khi schema=dbt_dev
+# Tạo các namespaces cần thiết trong Hive Metastore (lakehouse catalog)
+# trước khi chạy dbt:
+#   lakehouse.default  — required bởi Spark ThriftServer (default schema)
+#   lakehouse.dbt_dev  — required bởi dbt-spark khi schema=dbt_dev
 #
 # Cách chạy:
-#   ./scripts/run-spark-job.sh dev small nessie-namespace-setup
-#   ./scripts/run-spark-job.sh dev small nessie-namespace-setup logs
-#   ./scripts/run-spark-job.sh dev small nessie-namespace-setup delete
+#   ./scripts/run-spark-job.sh dev small lakehouse-namespace-setup
+#   ./scripts/run-spark-job.sh dev small lakehouse-namespace-setup logs
+#   ./scripts/run-spark-job.sh dev small lakehouse-namespace-setup delete
 #
 # Chạy 1 lần duy nhất (idempotent — dùng IF NOT EXISTS)
+# Catalog: lakehouse (Iceberg HiveCatalog → HMS thrift:9083)
 # ============================================================
 
-name: nessie-namespace-setup
+name: lakehouse-namespace-setup
 namespace: data-processing
 image: "apache/spark:3.5.3"
 imagePullPolicy: IfNotPresent
@@ -26,17 +28,18 @@ restartPolicy:
 
 sparkConf:
   "spark.sql.extensions": "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
-  "spark.sql.catalog.nessie":               "org.apache.iceberg.spark.SparkCatalog"
-  "spark.sql.catalog.nessie.catalog-impl":  "org.apache.iceberg.nessie.NessieCatalog"
-  "spark.sql.catalog.nessie.uri":           "http://nessie.data-modeling.svc.cluster.local:19120/api/v2"
-  "spark.sql.catalog.nessie.ref":           "main"
-  "spark.sql.catalog.nessie.warehouse":     "s3a://warehouse/"
-  "spark.hadoop.fs.s3a.endpoint":               "http://minio.data-storage.svc.cluster.local:9000"
-  "spark.hadoop.fs.s3a.access.key":             "admin"
-  "spark.hadoop.fs.s3a.secret.key":             "minio-dev-password"
-  "spark.hadoop.fs.s3a.path.style.access":      "true"
-  "spark.hadoop.fs.s3a.impl":                   "org.apache.hadoop.fs.s3a.S3AFileSystem"
-  "spark.hadoop.fs.s3a.connection.ssl.enabled": "false"
+  "spark.sql.catalogImplementation":                    "in-memory"
+  "spark.sql.catalog.lakehouse":                        "org.apache.iceberg.spark.SparkCatalog"
+  "spark.sql.catalog.lakehouse.catalog-impl":           "org.apache.iceberg.hive.HiveCatalog"
+  "spark.sql.catalog.lakehouse.uri":                    "thrift://hive-metastore.data-modeling.svc.cluster.local:9083"
+  "spark.sql.catalog.lakehouse.warehouse":              "s3a://warehouse/"
+  "spark.sql.defaultCatalog":                           "lakehouse"
+  "spark.hadoop.fs.s3a.endpoint":                       "http://minio.data-storage.svc.cluster.local:9000"
+  "spark.hadoop.fs.s3a.access.key":                     "admin"
+  "spark.hadoop.fs.s3a.secret.key":                     "minio-dev-password"
+  "spark.hadoop.fs.s3a.path.style.access":              "true"
+  "spark.hadoop.fs.s3a.impl":                           "org.apache.hadoop.fs.s3a.S3AFileSystem"
+  "spark.hadoop.fs.s3a.connection.ssl.enabled":         "false"
   "spark.jars": "local:///tmp/jars/iceberg-spark-runtime-3.5_2.12-1.6.1.jar,local:///tmp/jars/hadoop-aws-3.3.4.jar,local:///tmp/jars/aws-java-sdk-s3-1.12.587.jar,local:///tmp/jars/aws-java-sdk-core-1.12.587.jar,local:///tmp/jars/aws-java-sdk-sts-1.12.587.jar,local:///tmp/jars/aws-java-sdk-dynamodb-1.12.587.jar"
   "spark.driver.extraClassPath": "/tmp/jars/iceberg-spark-runtime-3.5_2.12-1.6.1.jar:/tmp/jars/hadoop-aws-3.3.4.jar:/tmp/jars/aws-java-sdk-s3-1.12.587.jar:/tmp/jars/aws-java-sdk-core-1.12.587.jar:/tmp/jars/aws-java-sdk-sts-1.12.587.jar:/tmp/jars/aws-java-sdk-dynamodb-1.12.587.jar"
   "spark.kubernetes.driver.deleteOnTermination": "false"
@@ -85,32 +88,32 @@ driverExtras:
           cat > /tmp/setup.py << 'PYEOF'
           from pyspark.sql import SparkSession
 
-          spark = SparkSession.builder.appName("nessie-namespace-setup").getOrCreate()
+          spark = SparkSession.builder.appName("lakehouse-namespace-setup").getOrCreate()
           spark.sparkContext.setLogLevel("WARN")
 
           SEP = "=" * 60
           print("\n" + SEP)
-          print("NESSIE NAMESPACE SETUP")
+          print("LAKEHOUSE (HMS) NAMESPACE SETUP")
           print(SEP)
 
           # Tạo 'default' namespace — required bởi Spark ThriftServer default session
-          spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.default")
-          print("[1] Namespace 'nessie.default' created (ThriftServer default session)")
+          spark.sql("CREATE NAMESPACE IF NOT EXISTS lakehouse.default")
+          print("[1] Namespace 'lakehouse.default' created (ThriftServer default session)")
 
           # Tạo 'dbt_dev' namespace — required bởi dbt-spark khi schema=dbt_dev
-          spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.dbt_dev")
-          print("[2] Namespace 'nessie.dbt_dev' created (dbt dev target)")
+          spark.sql("CREATE NAMESPACE IF NOT EXISTS lakehouse.dbt_dev")
+          print("[2] Namespace 'lakehouse.dbt_dev' created (dbt dev target)")
 
           # List all namespaces để verify
-          print("\n[3] All namespaces in Nessie:")
-          spark.sql("SHOW NAMESPACES IN nessie").show(truncate=False)
+          print("\n[3] All namespaces in lakehouse catalog:")
+          spark.sql("SHOW NAMESPACES IN lakehouse").show(truncate=False)
 
           print(SEP)
           print("SETUP COMPLETE")
           print(SEP + "\n")
           spark.stop()
           PYEOF
-          echo "Setup complete."
+          echo "Init done."
       volumeMounts:
         - name: workdir
           mountPath: /tmp

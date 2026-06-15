@@ -16,7 +16,7 @@ clean-targets: ["target", "dbt_packages"]
 models:
   data_platform:
     # Tất cả models dùng Iceberg format, lưu vào s3a://warehouse/dbt/
-    # Nessie là default catalog → nessie.<schema>.<model>
+    # "lakehouse" là default catalog (Iceberg HiveCatalog) → lakehouse.<schema>.<model>
     +file_format: iceberg
     +location_root: "s3a://warehouse/dbt"
 
