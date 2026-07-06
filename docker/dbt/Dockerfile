@@ -1,5 +1,6 @@
-# dbt image chạy như K8s Job trong cluster
-# Cài dbt + COPY project files → không cần ConfigMap thủ công
+# dbt image chạy như K8s Job trong cluster (P2.1)
+# Project + profiles bake sẵn — Job chỉ cần image + env vars, không ConfigMap,
+# không pip install lúc runtime (startup ~10s thay vì ~3 phút).
 FROM python:3.11-slim
 
 WORKDIR /dbt
@@ -9,10 +10,10 @@ RUN pip install --no-cache-dir \
     "dbt-core>=1.8.0,<2.0.0" \
     "dbt-spark[PyHive]>=1.8.0,<2.0.0"
 
-# COPY dbt project vào image
+# COPY dbt project (kèm profiles.yml — không chứa secret, config qua env vars)
 COPY dbt/ .
 
-# profiles.yml được inject lúc chạy qua env var hoặc K8s Secret mount
-# Không hardcode credentials vào image
+ENV DBT_PROFILES_DIR=/dbt
+
 ENTRYPOINT ["dbt"]
 CMD ["--help"]

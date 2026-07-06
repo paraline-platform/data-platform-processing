@@ -1,0 +1,27 @@
+# ============================================================
+# PROFILES.YML — dbt connection profile (bake vào image, KHÔNG chứa secret)
+# ============================================================
+# Toàn bộ giá trị đọc từ env vars do K8s Job inject (xem scripts/run-dbt.sh,
+# và sau này là ConfigMap `dbt-env` do infra deploy — xem PLATFORM-STRATEGY.md).
+#
+# Các outputs giống hệt nhau (YAML anchor) — env chỉ khác nhau ở
+# DBT_SCHEMA / DBT_THREADS, inject lúc runtime. Đổi env = đổi env vars,
+# KHÔNG sửa file này.
+data_platform:
+  target: "{{ env_var('DBT_TARGET', 'stg') }}"
+  outputs:
+    stg: &spark-thrift
+      type: spark
+      method: thrift
+      host: "{{ env_var('DBT_HOST', 'spark-thrift-server.data-modeling.svc.cluster.local') }}"
+      port: "{{ env_var('DBT_PORT', '10000') | as_number }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'dbt_stg') }}"
+      threads: "{{ env_var('DBT_THREADS', '1') | as_number }}"
+      connect_retries: 3
+      connect_timeout: 30
+    uat: *spark-thrift
+    prd: *spark-thrift
+    # Tên legacy (trước khi thống nhất naming stg/uat/prd — Phase 1).
+    # Xóa 2 dòng dưới sau khi run-dbt.sh không còn truyền --target dev/prod.
+    dev: *spark-thrift
+    prod: *spark-thrift

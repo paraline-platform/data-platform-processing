@@ -1,34 +1,32 @@
 # ============================================================
-# SPARK-JOBS/ICEBERG-TEST.YAML — Test: Iceberg + HMS + MinIO
+# SPARK-JOBS/ICEBERG-TEST.YAML — Test: Iceberg + HMS + MinIO (P2.2)
 # ============================================================
 # Verify:
 #   1. Spark kết nối được Hive Metastore (catalog "lakehouse")
 #   2. Tạo Iceberg table, ghi dữ liệu vào MinIO (S3A)
-#   3. Query lại dữ liệu từ Iceberg table
-#   4. Iceberg time-travel (snapshot history)
+#   3. Query lại dữ liệu + Iceberg time-travel (snapshot history)
 #
 # Cách chạy:
 #   ./scripts/run-spark-job.sh dev small iceberg-test
 #   ./scripts/run-spark-job.sh dev small iceberg-test logs
 #   ./scripts/run-spark-job.sh dev small iceberg-test delete
 #
-# JARs cần thiết (download bởi initContainer):
-#   iceberg-spark-runtime-3.5_2.12-1.6.1.jar  — Iceberg + HiveCatalog (~35MB)
-#   hadoop-aws-3.3.4.jar                       — S3AFileSystem implementation
-#   aws-java-sdk-s3-1.12.587.jar              — S3 operations
-#   aws-java-sdk-core-1.12.587.jar            — AWS SDK core
-#   aws-java-sdk-sts-1.12.587.jar             — STS auth
-#   aws-java-sdk-dynamodb-1.12.587.jar        — S3AFileSystem loads DynamoDB credential provider
+# P2.2 — thay đổi so với bản cũ:
+#   - Image ghcr có SẴN Iceberg + S3A JARs (không initContainer tải 6 JARs
+#     từ Maven mỗi lần chạy; không spark.jars config)
+#   - S3A creds KHÔNG hardcode trong sparkConf — driver/executor đọc
+#     AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY từ Secret "minio-s3a"
+#     (env vars nằm trong default credentials chain của S3A)
 #
-# Lý do dùng initContainer thay vì --packages:
-#   --packages → Ivy resolver chạy trong Spark Operator pod
-#   Operator pod không có home directory → /nonexistent/.ivy2/cache fail
-#   initContainer chạy trước driver → download JARs trước, không cần Ivy
+# Yêu cầu trước khi chạy (P5 sẽ thay bằng ExternalSecret từ Vault):
+#   kubectl create secret generic minio-s3a -n data-processing \
+#     --from-literal=AWS_ACCESS_KEY_ID=admin \
+#     --from-literal=AWS_SECRET_ACCESS_KEY=<minio-root-password>
 # ============================================================
 
 name: iceberg-hms-test
 namespace: data-processing
-image: "apache/spark:3.5.3"
+image: "ghcr.io/paraline-platform/spark:latest-stg"   # TODO(P3.7): pin sha tag
 imagePullPolicy: IfNotPresent
 type: Python
 mode: cluster
@@ -38,81 +36,45 @@ restartPolicy:
   type: Never
 
 sparkConf:
-  # Iceberg SQL extensions — bật CREATE TABLE ... USING iceberg, table.history, v$snapshots...
+  # Iceberg SQL extensions — bật CREATE TABLE ... USING iceberg, table.history...
   "spark.sql.extensions": "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
   "spark.sql.catalogImplementation":                    "in-memory"
 
-  # Lakehouse catalog config (Iceberg HiveCatalog → HMS thrift:9083)
-  # Truy cập bằng: spark.sql("SELECT * FROM lakehouse.demo.products")
+  # Lakehouse catalog (Iceberg HiveCatalog → HMS thrift:9083)
   "spark.sql.catalog.lakehouse":                        "org.apache.iceberg.spark.SparkCatalog"
   "spark.sql.catalog.lakehouse.catalog-impl":           "org.apache.iceberg.hive.HiveCatalog"
   "spark.sql.catalog.lakehouse.uri":                    "thrift://hive-metastore.data-modeling.svc.cluster.local:9083"
   "spark.sql.catalog.lakehouse.warehouse":              "s3a://warehouse/"
   "spark.sql.defaultCatalog":                           "lakehouse"
 
-  # MinIO S3A config
+  # MinIO S3A — KHÔNG có access/secret key ở đây (đọc từ env qua Secret)
   "spark.hadoop.fs.s3a.endpoint":                       "http://minio.data-storage.svc.cluster.local:9000"
-  "spark.hadoop.fs.s3a.access.key":                     "admin"
-  "spark.hadoop.fs.s3a.secret.key":                     "minio-dev-password"
   "spark.hadoop.fs.s3a.path.style.access":              "true"
   "spark.hadoop.fs.s3a.impl":                           "org.apache.hadoop.fs.s3a.S3AFileSystem"
   "spark.hadoop.fs.s3a.connection.ssl.enabled":         "false"
 
-  # JARs được download bởi initContainer vào /tmp/jars/
-  # local:// = đọc từ filesystem của driver/executor pod (không qua Ivy)
-  "spark.jars": "local:///tmp/jars/iceberg-spark-runtime-3.5_2.12-1.6.1.jar,local:///tmp/jars/hadoop-aws-3.3.4.jar,local:///tmp/jars/aws-java-sdk-s3-1.12.587.jar,local:///tmp/jars/aws-java-sdk-core-1.12.587.jar,local:///tmp/jars/aws-java-sdk-sts-1.12.587.jar,local:///tmp/jars/aws-java-sdk-dynamodb-1.12.587.jar"
-
   # Giữ driver pod sau khi fail để đọc logs (debug mode)
   "spark.kubernetes.driver.deleteOnTermination": "false"
 
-# emptyDir volume: chia sẻ giữa initContainer và main container trong cùng pod
+# emptyDir chia sẻ initContainer ↔ driver (chỉ để truyền test script)
 volumes:
   - name: workdir
     emptyDir: {}
 
 # ============================================================
-# DRIVER: download JARs + write test script
+# DRIVER: initContainer chỉ còn ghi test script (không network)
 # ============================================================
 driverExtras:
+  envFrom:
+    - secretRef:
+        name: minio-s3a
   initContainers:
-    - name: setup
+    - name: write-script
       image: busybox
       command:
         - sh
         - -c
         - |
-          set -e
-          mkdir -p /tmp/jars
-          MAVEN="https://repo1.maven.org/maven2"
-
-          echo "[1/6] Downloading iceberg-spark-runtime (~35MB)..."
-          wget -q -O /tmp/jars/iceberg-spark-runtime-3.5_2.12-1.6.1.jar \
-            "${MAVEN}/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar"
-
-          echo "[2/6] Downloading hadoop-aws..."
-          wget -q -O /tmp/jars/hadoop-aws-3.3.4.jar \
-            "${MAVEN}/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar"
-
-          echo "[3/6] Downloading aws-java-sdk-s3..."
-          wget -q -O /tmp/jars/aws-java-sdk-s3-1.12.587.jar \
-            "${MAVEN}/com/amazonaws/aws-java-sdk-s3/1.12.587/aws-java-sdk-s3-1.12.587.jar"
-
-          echo "[4/6] Downloading aws-java-sdk-core..."
-          wget -q -O /tmp/jars/aws-java-sdk-core-1.12.587.jar \
-            "${MAVEN}/com/amazonaws/aws-java-sdk-core/1.12.587/aws-java-sdk-core-1.12.587.jar"
-
-          echo "[5/6] Downloading aws-java-sdk-sts..."
-          wget -q -O /tmp/jars/aws-java-sdk-sts-1.12.587.jar \
-            "${MAVEN}/com/amazonaws/aws-java-sdk-sts/1.12.587/aws-java-sdk-sts-1.12.587.jar"
-
-          echo "[6/6] Downloading aws-java-sdk-dynamodb..."
-          wget -q -O /tmp/jars/aws-java-sdk-dynamodb-1.12.587.jar \
-            "${MAVEN}/com/amazonaws/aws-java-sdk-dynamodb/1.12.587/aws-java-sdk-dynamodb-1.12.587.jar"
-
-          echo "JARs ready:"
-          ls -lh /tmp/jars/
-
-          echo "Writing test script..."
           cat > /tmp/test.py << 'PYEOF'
           from pyspark.sql import SparkSession
 
@@ -138,8 +100,6 @@ driverExtras:
               ) USING iceberg
           """)
           print("[2] Iceberg table 'lakehouse.demo.products' created")
-          print("    Data files stored in: s3a://warehouse/demo/products/")
-          print("    Metadata managed by: HMS (PostgreSQL backend)")
 
           # 3. Insert dữ liệu
           spark.sql("""
@@ -152,11 +112,10 @@ driverExtras:
 
           # 4. Query lại
           df = spark.sql("SELECT * FROM lakehouse.demo.products ORDER BY id")
-          count = df.count()
-          print(f"\n[4] Query result: {count} rows")
+          print(f"\n[4] Query result: {df.count()} rows")
           df.show()
 
-          # 5. Xem snapshot history (Iceberg time-travel)
+          # 5. Snapshot history (Iceberg time-travel)
           history = spark.sql("SELECT * FROM lakehouse.demo.products.history")
           print("[5] Table snapshot history (Iceberg time-travel):")
           history.select("made_current_at", "snapshot_id", "parent_id").show()
@@ -166,7 +125,7 @@ driverExtras:
           print(SEP + "\n")
           spark.stop()
           PYEOF
-          echo "Init done."
+          echo "Script ready."
       volumeMounts:
         - name: workdir
           mountPath: /tmp
@@ -175,35 +134,9 @@ driverExtras:
       mountPath: /tmp
 
 # ============================================================
-# EXECUTOR: chỉ cần JARs (không cần test script)
+# EXECUTOR: JARs đã trong image — chỉ cần creds
 # ============================================================
 executorExtras:
-  initContainers:
-    - name: download-jars
-      image: busybox
-      command:
-        - sh
-        - -c
-        - |
-          set -e
-          mkdir -p /tmp/jars
-          MAVEN="https://repo1.maven.org/maven2"
-          wget -q -O /tmp/jars/iceberg-spark-runtime-3.5_2.12-1.6.1.jar \
-            "${MAVEN}/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar"
-          wget -q -O /tmp/jars/hadoop-aws-3.3.4.jar \
-            "${MAVEN}/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar"
-          wget -q -O /tmp/jars/aws-java-sdk-s3-1.12.587.jar \
-            "${MAVEN}/com/amazonaws/aws-java-sdk-s3/1.12.587/aws-java-sdk-s3-1.12.587.jar"
-          wget -q -O /tmp/jars/aws-java-sdk-core-1.12.587.jar \
-            "${MAVEN}/com/amazonaws/aws-java-sdk-core/1.12.587/aws-java-sdk-core-1.12.587.jar"
-          wget -q -O /tmp/jars/aws-java-sdk-sts-1.12.587.jar \
-            "${MAVEN}/com/amazonaws/aws-java-sdk-sts/1.12.587/aws-java-sdk-sts-1.12.587.jar"
-          wget -q -O /tmp/jars/aws-java-sdk-dynamodb-1.12.587.jar \
-            "${MAVEN}/com/amazonaws/aws-java-sdk-dynamodb/1.12.587/aws-java-sdk-dynamodb-1.12.587.jar"
-          echo "Executor JARs ready."
-      volumeMounts:
-        - name: workdir
-          mountPath: /tmp
-  volumeMounts:
-    - name: workdir
-      mountPath: /tmp
+  envFrom:
+    - secretRef:
+        name: minio-s3a
