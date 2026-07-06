@@ -170,7 +170,9 @@ spec:
             - |
               set -e
               echo "==> Installing dependencies..."
-              apt-get install -qq -y git 2>/dev/null | tail -1
+              # apt-get update bắt buộc: python:3.11-slim không có sẵn apt package lists
+              # (P2.1 sẽ thay toàn bộ cơ chế pip-install runtime này bằng image GHCR)
+              apt-get update -qq && apt-get install -qq -y git 2>/dev/null | tail -1
               # dbt 2.0 (Fusion engine) không support spark adapter
               # Explicit <2.0.0 để pip không resolve dbt-core 2.0.0-alpha
               pip install -q \
