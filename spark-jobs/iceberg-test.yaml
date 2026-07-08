@@ -7,9 +7,9 @@
 #   3. Query lại dữ liệu + Iceberg time-travel (snapshot history)
 #
 # Cách chạy:
-#   ./scripts/run-spark-job.sh dev small iceberg-test
-#   ./scripts/run-spark-job.sh dev small iceberg-test logs
-#   ./scripts/run-spark-job.sh dev small iceberg-test delete
+#   ./scripts/run-spark-job.sh stg small iceberg-test
+#   ./scripts/run-spark-job.sh stg small iceberg-test logs
+#   ./scripts/run-spark-job.sh stg small iceberg-test delete
 #
 # P2.2 — thay đổi so với bản cũ:
 #   - Image ghcr có SẴN Iceberg + S3A JARs (không initContainer tải 6 JARs

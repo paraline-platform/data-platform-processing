@@ -6,11 +6,11 @@
 #   ./scripts/run-dbt.sh <env> [command] [dbt-options...]
 #
 # Examples:
-#   ./scripts/run-dbt.sh dev run
-#   ./scripts/run-dbt.sh dev run --select staging
-#   ./scripts/run-dbt.sh dev test
-#   ./scripts/run-dbt.sh dev debug                 # test Thrift connection
-#   DBT_IMAGE=ghcr.io/paraline-platform/dbt:stg-abc1234 ./scripts/run-dbt.sh dev run
+#   ./scripts/run-dbt.sh stg run
+#   ./scripts/run-dbt.sh stg run --select staging
+#   ./scripts/run-dbt.sh stg test
+#   ./scripts/run-dbt.sh stg debug                 # test Thrift connection
+#   DBT_IMAGE=ghcr.io/paraline-platform/dbt:stg-abc1234 ./scripts/run-dbt.sh stg run
 #
 # So với bản cũ (P2.1 — xem docs/optimization/03 trong infra repo):
 #   - KHÔNG pip install lúc runtime (image build sẵn bởi CI) → start ~10s
@@ -23,7 +23,7 @@
 # ============================================================
 set -euo pipefail
 
-ENV=${1:?$'Usage: ./scripts/run-dbt.sh <env> [command] [options]\nExample: ./scripts/run-dbt.sh dev run'}
+ENV=${1:?$'Usage: ./scripts/run-dbt.sh <env> [command] [options]\nExample: ./scripts/run-dbt.sh stg run'}
 COMMAND=${2:-run}
 shift 2 || true
 
@@ -33,10 +33,10 @@ JOB_NAME="dbt-${COMMAND}-$(date +%s)"
 
 # env → schema/threads (khớp environments/<env>.yaml bên infra; đổi ở đây khi đổi bên đó)
 case "$ENV" in
-  dev)  SCHEMA=dbt_dev;  THREADS=1 ;;
+  stg)  SCHEMA=dbt_stg;  THREADS=1 ;;
   uat)  SCHEMA=dbt_uat;  THREADS=2 ;;
-  prod) SCHEMA=dbt_prod; THREADS=4 ;;
-  *) echo "ERROR: env không hợp lệ: $ENV (dev|uat|prod)"; exit 1 ;;
+  prd)  SCHEMA=dbt_prd;  THREADS=4 ;;
+  *) echo "ERROR: env không hợp lệ: $ENV (stg|uat|prd)"; exit 1 ;;
 esac
 
 # dbt args → JSON array cho container args

@@ -11,8 +11,8 @@
 # hadoop-aws + aws-java-sdk-bundle — xem: spark-jobs/README.md
 #
 # Cách chạy:
-#   ./scripts/run-spark-job.sh dev small spark-minio
-#   ./scripts/run-spark-job.sh dev small spark-minio logs
+#   ./scripts/run-spark-job.sh stg small spark-minio
+#   ./scripts/run-spark-job.sh stg small spark-minio logs
 #
 # Expected output trong logs:
 #   SUCCESS: Spark DataFrame — 3 records

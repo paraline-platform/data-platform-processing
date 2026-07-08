@@ -6,7 +6,7 @@
 #   lakehouse.dbt_dev  — required bởi dbt-spark khi schema=dbt_dev
 #
 # Cách chạy (idempotent — IF NOT EXISTS):
-#   ./scripts/run-spark-job.sh dev small lakehouse-namespace-setup
+#   ./scripts/run-spark-job.sh stg small lakehouse-namespace-setup
 #
 # P2.2: image ghcr có sẵn JARs; S3A creds qua Secret "minio-s3a"
 # (tạo secret: xem header của iceberg-test.yaml)

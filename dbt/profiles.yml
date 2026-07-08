@@ -21,7 +21,3 @@ data_platform:
       connect_timeout: 30
     uat: *spark-thrift
     prd: *spark-thrift
-    # Tên legacy (trước khi thống nhất naming stg/uat/prd — Phase 1).
-    # Xóa 2 dòng dưới sau khi run-dbt.sh không còn truyền --target dev/prod.
-    dev: *spark-thrift
-    prod: *spark-thrift

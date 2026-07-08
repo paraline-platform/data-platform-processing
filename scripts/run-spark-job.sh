@@ -6,23 +6,23 @@
 #   ./scripts/run-spark-job.sh <env> <profile> <job-name> [action]
 #
 # Arguments:
-#   env      : dev | uat | prod
+#   env      : stg | uat | prd
 #   profile  : small | medium | large | xlarge
 #   job-name : tên file trong spark-jobs/ (không có .yaml)
 #   action   : apply (default) | delete | template | status | logs
 #
 # Examples:
-#   ./scripts/run-spark-job.sh dev small spark-pi
-#   ./scripts/run-spark-job.sh dev small spark-pi template   # xem YAML trước
-#   ./scripts/run-spark-job.sh dev small spark-pi delete
-#   ./scripts/run-spark-job.sh dev small spark-pi status
-#   ./scripts/run-spark-job.sh dev small spark-pi logs
+#   ./scripts/run-spark-job.sh stg small spark-pi
+#   ./scripts/run-spark-job.sh stg small spark-pi template   # xem YAML trước
+#   ./scripts/run-spark-job.sh stg small spark-pi delete
+#   ./scripts/run-spark-job.sh stg small spark-pi status
+#   ./scripts/run-spark-job.sh stg small spark-pi logs
 # ============================================================
 
 set -euo pipefail
 
 # --- Args ---
-ENV=${1:?$'Usage: ./scripts/run-spark-job.sh <env> <profile> <job-name> [action]\nExample: ./scripts/run-spark-job.sh dev small spark-pi'}
+ENV=${1:?$'Usage: ./scripts/run-spark-job.sh <env> <profile> <job-name> [action]\nExample: ./scripts/run-spark-job.sh stg small spark-pi'}
 PROFILE=${2:?$'Missing profile. Use: small | medium | large | xlarge'}
 JOB_NAME=${3:?$'Missing job-name. Files available in spark-jobs/'}
 ACTION=${4:-apply}
