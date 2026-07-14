@@ -2,6 +2,11 @@
 # ============================================================
 # RUN-DBT.SH — Chạy dbt như K8s Job từ image GHCR (P2.1)
 # ============================================================
+# ⚠️ DEPRECATED (dbt → Airflow): dbt giờ chạy trong Airflow qua DAG `05_dbt`
+#    (data-platform-airflow/dags/05_dbt_dag.py) — luồng điều phối DUY NHẤT.
+#    Script này GIỮ TẠM để chạy thủ công lúc dev, sẽ XÓA sau khi DAG 05 được
+#    validate trên cluster thật. Ưu tiên trigger DAG 05 thay vì script này.
+# ------------------------------------------------------------
 # Usage:
 #   ./scripts/run-dbt.sh <env> [command] [dbt-options...]
 #
